@@ -29,7 +29,7 @@ To make a location translation for a game, download the games base location file
 
 Then, replace all the map names with the target languages translation.
 
-After that, rename the file to gamename_twolettercode (example: blackrain_jp) and make a pull request here (file should be in /locations) or send it to me on discord at "violetsitas"
+After that, rename the file to gamename_twolettercode (example: blackrain_ja) and make a pull request here (file should be in /locations) or send it to me on discord at "violetsitas"
 
 # Locations
 
