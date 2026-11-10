@@ -1,0 +1,45 @@
+name: Validate and format JSON files
+on:
+  pull_request:
+    branches: [ main, master ]
+
+  workflow_dispatch:
+
+jobs:
+  validate_n_format:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.head_ref }}
+          persist-credentials: true
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v7.1.0
+      
+      # pretty print him
+      - name: Pretty-print all files
+        run: npx prettier --write "**/*.json"
+      
+      # not lke doing this matters because prettier
+      # will check and fail anyway but may as well i guess
+      
+      # jq doesn't really show a very descriptive message
+      # in the job so this it's better to just let prettier
+      # fail since it shows exactly where the error is
+      - name: Validate JSON syntax
+        run: |
+          find . -name "*.json" -not -path "./node_modules/*" | while read file; do
+            echo "Validating $file..."
+            jq empty "$file" || exit 1
+          done
+      
+      - name: Commit formatted changes
+        uses: stefanzweifel/git-auto-commit-action@v7.2.1
+        with:
+          commit_message: "chore: auto-format JSON files"
