@@ -18,10 +18,120 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: ${{ github.head_ref }}
           persist-credentials: true
+          fetch-depth: 0
       
       - name: Setup Node.js
         uses: actions/setup-node@v7.1.0
+
+      - name: List JSON files to validate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git diff --name-only --diff-filter=d "origin/$BASE_REF...HEAD" -- '*.json' > "$RUNNER_TEMP/json_files.txt"
+          else
+            git ls-files '*.json' > "$RUNNER_TEMP/json_files.txt"
+          fi
+
+          echo "JSON files to validate:"
+          cat "$RUNNER_TEMP/json_files.txt"
       
+      - name: Validate location structures
+        run: |
+          FAILED=0
+
+          while read file; do
+            echo "Checking structure of $file..."
+
+            if ! jq -e 'type == "object"' "$file" > /dev/null; then
+              echo "ERROR: [$file] Missing beginning and ending curly braces {}, or invalid object"
+              FAILED=1
+              continue
+            fi
+
+            echo "Checking required fields..."
+            
+            if ! jq -e 'has("game")' "$file" > /dev/null; then
+              echo "ERROR: [$file] missing game field!"
+              FAILED=1
+              continue
+            fi
+
+            if ! jq -e '.game | type == "string"' "$file" > /dev/null; then
+              echo "ERROR: [$file] 'game' field must be a string! Did you forget to use \"quotes\"?"
+              FAILED=1
+              continue
+            fi
+
+            echo "Checking map IDs and names..."
+
+            INVALID_ENTRIES=$(jq -c '
+              to_entries | map(select(
+                if .key == "game" then 
+                  (.value | type != "string") 
+                else
+                  (.key | test("^[0-9]{4}$") | not) or (.value | type != "string") 
+                end
+              ))
+            ' "$file")
+
+            if [ "$(echo "$INVALID_ENTRIES" | jq 'length')" -gt 0 ]; then
+              echo "Error: [$file] Validation failed for the following key(s):"
+              echo "$INVALID_ENTRIES" | jq -r '.[] | "  - Key: \"\(.key)\" (Value: \(.value), Type: \(.value | type))"'
+              echo "Rule: Keys must be 'game' or string containing 4-digit number (e.g. 0067, 1234), and all values must be strings."
+              FAILED=1
+              continue
+            fi
+          done < <(grep -E '^locations/' "$RUNNER_TEMP/json_files.txt")
+
+          if [ "$FAILED" -eq 1 ]; then
+            exit 1
+          fi
+
+      - name: Validate site translation structures
+        run: |
+          FAILED=0
+
+          while read file; do
+            echo "Checking structure of $file..."
+
+            if ! jq -e 'type == "object"' "$file" > /dev/null; then
+              echo "ERROR: [$file] Missing beginning and ending curly braces {}, or invalid object"
+              FAILED=1
+              continue
+            fi
+
+            PROBLEMS=$(jq -r '
+              (if (.code | type) != "string" then
+                "  - Field \"code\" must be a string (found: \(.code | type))"
+              else empty end),
+              (if (.name | type) != "string" then
+                "  - Field \"name\" must be a string (found: \(.name | type))"
+              else empty end),
+              (if (.rtl | type) != "boolean" then
+                "  - Field \"rtl\" must be a boolean (found: \(.rtl | type))"
+              else empty end),
+              (if (.strings | type) != "object" then
+                "  - Field \"strings\" must be an object (found: \(.strings | type))"
+              else
+                (.strings | to_entries[] | select(.value | type != "string") |
+                  "  - strings key: \"\(.key)\" (Value: \(.value), Type: \(.value | type)) - value must be a string")
+              end)
+            ' "$file")
+
+            if [ -n "$PROBLEMS" ]; then
+              echo "ERROR: [$file] Validation failed for the following:"
+              echo "$PROBLEMS"
+              echo "Rule: code and name must be strings, rtl must be a boolean, strings must be an object of string keys and string values."
+              FAILED=1
+            fi
+          done < <(grep -E '^gamepage/' "$RUNNER_TEMP/json_files.txt" | grep -v -x 'gamepage/lang/index.json')
+
+          if [ "$FAILED" -eq 1 ]; then
+            exit 1
+          fi
+
       # pretty print him
       - name: Pretty-print all files
         run: npx prettier --write "**/*.json"
